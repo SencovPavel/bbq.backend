@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'picnic',
+      name: process.env.PM2_NAME || 'picnic-main',
       script: 'server.js',
       instances: 1,
       autorestart: true,
