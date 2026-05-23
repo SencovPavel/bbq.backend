@@ -1,0 +1,35 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy backend → production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+
+            DEPLOY_DIR="/var/www/picnic/picnic-backend"
+
+            echo "▶ Deploying backend → $DEPLOY_DIR"
+
+            cd "$DEPLOY_DIR"
+
+            git fetch origin
+            git reset --hard origin/main
+
+            npm ci --prefer-offline
+
+            pm2 reload ecosystem.config.js --update-env
+
+            echo "✅ Done: backend restarted"
