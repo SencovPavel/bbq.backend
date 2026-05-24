@@ -133,6 +133,28 @@ async function migrate() {
       console.log('  ↳ Осиротевших позиций не найдено');
     }
     console.log('✅ Миграция v4.1 выполнена');
+
+    // v5: admin roles
+    await client.query(`
+      ALTER TABLE group_members ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+    `);
+    // Назначаем первого вступившего в каждую группу администратором (если нет ни одного)
+    await client.query(`
+      UPDATE group_members gm
+      SET is_admin = TRUE
+      FROM (
+        SELECT DISTINCT ON (group_id) group_id, user_id
+        FROM group_members
+        ORDER BY group_id, joined_at ASC
+      ) first_member
+      WHERE gm.group_id = first_member.group_id
+        AND gm.user_id  = first_member.user_id
+        AND NOT EXISTS (
+          SELECT 1 FROM group_members
+          WHERE group_id = gm.group_id AND is_admin = TRUE
+        );
+    `);
+    console.log('✅ Миграция v5 (admin roles) выполнена');
   } finally {
     client.release();
     await pool.end();
