@@ -72,7 +72,26 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_chat_group ON chat_messages(group_id);
       CREATE INDEX IF NOT EXISTS idx_groups_chat ON picnic_groups(tg_chat_id);
     `);
-    console.log('✅ Миграция v3 выполнена');
+
+    // v4: events + event_id on items
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id          TEXT PRIMARY KEY,
+        group_id    TEXT NOT NULL REFERENCES picnic_groups(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        event_date  DATE,
+        event_time  TIME,
+        location    TEXT,
+        description TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS event_id TEXT REFERENCES events(id) ON DELETE CASCADE;
+
+      CREATE INDEX IF NOT EXISTS idx_events_group ON events(group_id);
+      CREATE INDEX IF NOT EXISTS idx_items_event ON items(event_id);
+    `);
+    console.log('✅ Миграция v4 выполнена');
   } finally {
     client.release();
     await pool.end();
