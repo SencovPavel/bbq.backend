@@ -7,41 +7,33 @@ on:
 jobs:
   deploy:
     name: Deploy → ${{ github.ref_name }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy backend
         env:
           BRANCH: ${{ github.ref_name }}
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: BRANCH
-          script: |
-            set -e
+        run: |
+          set -e
 
-            if [ "$BRANCH" = "main" ]; then
-              DEPLOY_DIR="/var/www/picnic/be-main"
-              PM2_NAME="picnic-main"
-            else
-              DEPLOY_DIR="/var/www/picnic/be-dev"
-              PM2_NAME="picnic-dev"
-            fi
+          if [ "$BRANCH" = "main" ]; then
+            DEPLOY_DIR="/var/www/picnic/be-main"
+            PM2_NAME="picnic-main"
+          else
+            DEPLOY_DIR="/var/www/picnic/be-dev"
+            PM2_NAME="picnic-dev"
+          fi
 
-            echo "▶ Deploying backend '$BRANCH' → $DEPLOY_DIR"
+          echo "▶ Deploying backend '$BRANCH' → $DEPLOY_DIR"
 
-            cd "$DEPLOY_DIR"
+          cd "$DEPLOY_DIR"
+          git fetch origin
+          git checkout "$BRANCH"
+          git reset --hard "origin/$BRANCH"
+          npm ci --prefer-offline
 
-            git fetch origin
-            git checkout "$BRANCH"
-            git reset --hard "origin/$BRANCH"
+          pm2 describe "$PM2_NAME" > /dev/null 2>&1 \
+            && pm2 reload "$PM2_NAME" --update-env \
+            || PM2_NAME="$PM2_NAME" pm2 start ecosystem.config.js
 
-            npm ci --prefer-offline
-
-            pm2 describe "$PM2_NAME" > /dev/null 2>&1 \
-              && pm2 reload "$PM2_NAME" --update-env \
-              || PM2_NAME="$PM2_NAME" pm2 start ecosystem.config.js
-
-            echo "✅ Done: $PM2_NAME restarted"
+          echo "✅ Done: $PM2_NAME restarted"
