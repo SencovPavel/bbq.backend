@@ -155,6 +155,13 @@ async function migrate() {
         );
     `);
     console.log('✅ Миграция v5 (admin roles) выполнена');
+
+    // v6: MAX Messenger support
+    await client.query(`
+      ALTER TABLE picnic_groups ADD COLUMN IF NOT EXISTS max_chat_id BIGINT;
+      CREATE INDEX IF NOT EXISTS idx_groups_max ON picnic_groups(max_chat_id);
+    `);
+    console.log('✅ Миграция v6 (MAX messenger) выполнена');
   } finally {
     client.release();
     await pool.end();

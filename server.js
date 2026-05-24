@@ -5,7 +5,8 @@ const { WebSocketServer } = require('ws');
 const { pool }          = require('./lib/db');
 const { broadcast, createWsHandler } = require('./lib/ws');
 const { handleRequest } = require('./lib/routes');
-const { setWebhook }    = require('./lib/bot');
+const { setWebhook }              = require('./lib/bot');
+const { setWebhook: setMaxWebhook } = require('./lib/bot-max');
 
 const PORT = process.env.PORT || 3001;
 
@@ -41,6 +42,9 @@ async function start() {
     console.log(`🔥 Picnic backend: http://localhost:${PORT}`);
     if (process.env.PUBLIC_URL && process.env.BOT_TOKEN) {
       await setWebhook(process.env.PUBLIC_URL);
+    }
+    if (process.env.PUBLIC_URL && process.env.MAX_TOKEN) {
+      await setMaxWebhook();
     }
   });
 }
