@@ -183,6 +183,24 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
     `);
     console.log('✅ Миграция v7 (web auth) выполнена');
+
+    // v7.1: OAuth accounts + make password_hash nullable
+    await client.query(`
+      ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS oauth_accounts (
+        id          SERIAL PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider    TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        email       TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(provider, provider_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_oauth_user ON oauth_accounts(user_id);
+    `);
+    console.log('✅ Миграция v7.1 (OAuth accounts) выполнена');
   } finally {
     client.release();
     await pool.end();
