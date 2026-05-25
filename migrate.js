@@ -162,6 +162,27 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_groups_max ON picnic_groups(max_chat_id);
     `);
     console.log('✅ Миграция v6 (MAX messenger) выполнена');
+
+    // v7: web auth (email + password)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id            TEXT PRIMARY KEY,
+        email         TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id         TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
+    `);
+    console.log('✅ Миграция v7 (web auth) выполнена');
   } finally {
     client.release();
     await pool.end();
