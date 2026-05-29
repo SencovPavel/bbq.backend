@@ -201,6 +201,12 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_oauth_user ON oauth_accounts(user_id);
     `);
     console.log('✅ Миграция v7.1 (OAuth accounts) выполнена');
+
+    // v8: event status
+    await client.query(`
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+    `);
+    console.log('✅ Миграция v8 (event status) выполнена');
   } finally {
     client.release();
     await pool.end();
