@@ -207,6 +207,21 @@ async function migrate() {
       ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
     `);
     console.log('✅ Миграция v8 (event status) выполнена');
+
+    // v9: group activity log
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS group_activity (
+        id         SERIAL PRIMARY KEY,
+        group_id   TEXT NOT NULL REFERENCES picnic_groups(id) ON DELETE CASCADE,
+        event_id   TEXT REFERENCES events(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL,
+        actor_name TEXT,
+        data       JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_group ON group_activity(group_id, created_at DESC);
+    `);
+    console.log('✅ Миграция v9 (group activity) выполнена');
   } finally {
     client.release();
     await pool.end();
