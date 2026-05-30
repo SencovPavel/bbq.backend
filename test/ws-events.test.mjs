@@ -61,7 +61,7 @@ describe('event:add', () => {
 
     const updateCall = calls.find(s => /UPDATE events SET status='completed'/.test(s));
     expect(updateCall).toBeDefined();
-    expect(updateCall).toContain("status='active'");
+    expect(updateCall).toContain('IS DISTINCT FROM');
   });
 
   it('admin: INSERT нового события идёт после UPDATE, статус active', async () => {

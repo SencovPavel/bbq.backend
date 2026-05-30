@@ -12,9 +12,35 @@ function wrapPool(handler) {
     if (typeof sql === 'string' && sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
       return { rows: [{ ok: 1 }] };
     }
+    if (typeof sql === 'string' && sql.includes('SELECT event_id FROM items')) {
+      return { rows: [{ event_id: 'evt1' }] };
+    }
+    if (typeof sql === 'string' && sql.includes('SELECT status FROM events')) {
+      return { rows: [{ status: 'active' }] };
+    }
     if (handler) return handler(sql, params);
     return { rows: [] };
   };
+}
+
+function wrapLockedPool(handler) {
+  return async (sql, params) => {
+    if (typeof sql === 'string' && sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+      return { rows: [{ ok: 1 }] };
+    }
+    if (typeof sql === 'string' && sql.includes('SELECT status FROM events')) {
+      return { rows: [{ status: 'completed' }] };
+    }
+    if (typeof sql === 'string' && sql.includes('SELECT event_id FROM items')) {
+      return { rows: [{ event_id: 'evt1' }] };
+    }
+    if (handler) return handler(sql, params);
+    return { rows: [] };
+  };
+}
+
+function makeLockedPool() {
+  return { query: vi.fn().mockImplementation(wrapLockedPool()) };
 }
 
 function makePool() {
@@ -117,5 +143,28 @@ describe('item:delete', () => {
     const delCall = pool.query.mock.calls.find(([sql]) => sql.includes('DELETE FROM items'));
     const [, params] = delCall;
     expect(params).toEqual(['item42', 'g1']);
+  });
+});
+
+describe('завершённое событие', () => {
+  it('item:add — не создаёт позицию', async () => {
+    const pool = makeLockedPool();
+    await dispatchMessage(
+      { type: 'item:add', catId: 'food', name: 'Хлеб', eventId: 'evt1' },
+      ctx(pool),
+    );
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO items'))).toBe(false);
+  });
+
+  it('item:update — не меняет позицию', async () => {
+    const pool = makeLockedPool();
+    await dispatchMessage({ type: 'item:update', id: 'i1', field: 'price', value: 100 }, ctx(pool));
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('UPDATE items SET'))).toBe(false);
+  });
+
+  it('item:delete — не удаляет позицию', async () => {
+    const pool = makeLockedPool();
+    await dispatchMessage({ type: 'item:delete', id: 'i1' }, ctx(pool));
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('DELETE FROM items'))).toBe(false);
   });
 });
