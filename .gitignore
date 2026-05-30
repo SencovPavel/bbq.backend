@@ -2,3 +2,8 @@ node_modules/
 .env
 *.log
 npm-debug.log*
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
