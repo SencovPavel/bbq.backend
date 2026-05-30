@@ -224,16 +224,16 @@ async function migrate() {
     `);
     console.log('✅ Миграция v9 (group activity) выполнена');
 
-    // v10: одно active-событие на группу (последнее по created_at)
+    // v10: нормализация status в events (группы picnic_groups не затрагиваются)
     const { activeEvents } = await normalizeEventStatusPerGroup(client);
     if (activeEvents.length === 0) {
       console.log('  ↳ Событий для нормализации статуса не найдено');
     } else {
       for (const evt of activeEvents) {
-        console.log(`  ↳ Группа ${evt.group_id}: active → «${evt.name}» (${evt.id})`);
+        console.log(`  ↳ Событие «${evt.name}» (${evt.id}) → active, остальные в группе ${evt.group_id} → completed`);
       }
     }
-    console.log(`✅ Миграция v10 (event status normalize): ${activeEvents.length} групп`);
+    console.log(`✅ Миграция v10 (статусы событий): ${activeEvents.length} активных событий`);
   } finally {
     client.release();
     await pool.end();
