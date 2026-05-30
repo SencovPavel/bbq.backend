@@ -24,6 +24,9 @@ beforeEach(() => broadcast.mockClear());
 function adminPool(userId = 'admin1', adminCount = 2) {
   return {
     query: vi.fn().mockImplementation(async (sql) => {
+      if (sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+        return { rows: [{ ok: 1 }] };
+      }
       if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: true }] };
       if (sql.includes('COUNT(*)'))        return { rows: [{ cnt: String(adminCount) }] };
       return { rows: [] };
@@ -35,6 +38,9 @@ function adminPool(userId = 'admin1', adminCount = 2) {
 function nonAdminPool() {
   return {
     query: vi.fn().mockImplementation(async (sql) => {
+      if (sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+        return { rows: [{ ok: 1 }] };
+      }
       if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: false }] };
       return { rows: [] };
     }),
@@ -75,7 +81,14 @@ describe('member:remove', () => {
 
 describe('member:leave', () => {
   it('пользователь может покинуть группу сам', async () => {
-    const pool = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+    const pool = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (typeof sql === 'string' && sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+          return { rows: [{ ok: 1 }] };
+        }
+        return { rows: [] };
+      }),
+    };
     await dispatchMessage({ type: 'member:leave' }, ctx(pool, 'user5'));
 
     const delCall = pool.query.mock.calls.find(([sql]) => sql.includes('DELETE FROM group_members'));

@@ -7,8 +7,18 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { dispatchMessage } = require('../lib/ws.js');
 
+function wrapPool(handler) {
+  return async (sql, params) => {
+    if (typeof sql === 'string' && sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+      return { rows: [{ ok: 1 }] };
+    }
+    if (handler) return handler(sql, params);
+    return { rows: [] };
+  };
+}
+
 function makePool() {
-  return { query: vi.fn().mockResolvedValue({ rows: [] }) };
+  return { query: vi.fn().mockImplementation(wrapPool()) };
 }
 
 const getFullState = async () => ({});
@@ -27,7 +37,8 @@ describe('item:add', () => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:add', catId: 'food', name: 'Хлеб' }, ctx(pool));
 
-    const [, params] = pool.query.mock.calls[0];
+    const insertCall = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO items'));
+    const [, params] = insertCall;
     const priceIdx = 4; // позиция price в INSERT
     expect(params[priceIdx]).toBe(0);
   });
@@ -36,7 +47,8 @@ describe('item:add', () => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:add', catId: 'food', name: 'Хлеб' }, ctx(pool));
 
-    const [, params] = pool.query.mock.calls[0];
+    const insertCall = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO items'));
+    const [, params] = insertCall;
     expect(params[5]).toBe(1); // qty
   });
 
@@ -44,7 +56,8 @@ describe('item:add', () => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:add', catId: 'food', name: 'Хлеб' }, ctx(pool));
 
-    const [, params] = pool.query.mock.calls[0];
+    const insertCall = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO items'));
+    const [, params] = insertCall;
     expect(params[6]).toBe('шт'); // unit
   });
 
@@ -52,7 +65,8 @@ describe('item:add', () => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:add', catId: 'food', name: 'Хлеб' }, ctx(pool));
 
-    const [, params] = pool.query.mock.calls[0];
+    const insertCall = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO items'));
+    const [, params] = insertCall;
     expect(params[7]).toBe('manual');
   });
 
@@ -63,7 +77,8 @@ describe('item:add', () => {
       ctx(pool),
     );
 
-    const [, params] = pool.query.mock.calls[0];
+    const insertCall = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO items'));
+    const [, params] = insertCall;
     expect(params[4]).toBe(500); // price
     expect(params[5]).toBe(2);   // qty
     expect(params[6]).toBe('кг'); // unit
@@ -88,7 +103,7 @@ describe('item:update', () => {
   it.each(FORBIDDEN)('блокирует поле "%s"', async (field) => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:update', id: 'i1', field, value: 'evil' }, ctx(pool));
-    expect(pool.query).not.toHaveBeenCalled();
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('SET '))).toBe(false);
   });
 });
 
@@ -99,7 +114,8 @@ describe('item:delete', () => {
     const pool = makePool();
     await dispatchMessage({ type: 'item:delete', id: 'item42' }, ctx(pool));
 
-    const [, params] = pool.query.mock.calls[0];
+    const delCall = pool.query.mock.calls.find(([sql]) => sql.includes('DELETE FROM items'));
+    const [, params] = delCall;
     expect(params).toEqual(['item42', 'g1']);
   });
 });

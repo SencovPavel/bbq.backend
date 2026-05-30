@@ -22,19 +22,28 @@ function ctx(pool, extra = {}) {
 }
 
 /** Пул где текущий пользователь — администратор */
+function withMembership(handler) {
+  return async (sql, params) => {
+    if (sql.includes('FROM group_members') && sql.includes('SELECT 1')) {
+      return { rows: [{ ok: 1 }] };
+    }
+    return handler(sql, params);
+  };
+}
+
 function makeAdminPool(extraHandler) {
-  return makePool(async (sql, params) => {
+  return makePool(withMembership(async (sql, params) => {
     if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: true }] };
     return extraHandler ? extraHandler(sql, params) : { rows: [] };
-  });
+  }));
 }
 
 /** Пул где текущий пользователь — НЕ администратор */
 function makeNonAdminPool() {
-  return makePool(async (sql) => {
+  return makePool(withMembership(async (sql) => {
     if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: false }] };
     return { rows: [] };
-  });
+  }));
 }
 
 beforeEach(() => broadcast.mockClear());
@@ -152,7 +161,7 @@ describe('event:update', () => {
   const FORBIDDEN = ['status', 'id', 'group_id', 'created_at', '__proto__'];
 
   it.each(ALLOWED)('разрешает поле "%s"', async (field) => {
-    const pool = makePool(async () => ({ rows: [] }));
+    const pool = makeAdminPool();
     await dispatchMessage({ type: 'event:update', id: 'e1', field, value: 'v' }, ctx(pool));
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining(`SET ${field}=`),
@@ -161,10 +170,9 @@ describe('event:update', () => {
   });
 
   it.each(FORBIDDEN)('блокирует поле "%s"', async (field) => {
-    const pool = makePool(async () => ({ rows: [] }));
+    const pool = makeNonAdminPool();
     await dispatchMessage({ type: 'event:update', id: 'e1', field, value: 'v' }, ctx(pool));
-    // query не должен быть вызван ни разу
-    expect(pool.query).not.toHaveBeenCalled();
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('SET '))).toBe(false);
   });
 });
 
@@ -173,7 +181,7 @@ describe('event:update', () => {
 describe('event:delete', () => {
   it('удаляет событие только своей группы', async () => {
     const queries = [];
-    const pool = makePool(async (sql, params) => {
+    const pool = makeAdminPool(async (sql, params) => {
       queries.push({ sql, params });
       return { rows: [] };
     });
