@@ -14,7 +14,6 @@ function makePool(queryImpl) {
   return { query: vi.fn().mockImplementation(queryImpl) };
 }
 
-const noop        = async () => {};
 const getFullState = async () => ({});
 const broadcast   = vi.fn();
 
@@ -22,47 +21,56 @@ function ctx(pool, extra = {}) {
   return { groupId: 'g1', userId: 'u1', pool, getFullState, broadcast, ...extra };
 }
 
+/** Пул где текущий пользователь — администратор */
+function makeAdminPool(extraHandler) {
+  return makePool(async (sql, params) => {
+    if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: true }] };
+    return extraHandler ? extraHandler(sql, params) : { rows: [] };
+  });
+}
+
+/** Пул где текущий пользователь — НЕ администратор */
+function makeNonAdminPool() {
+  return makePool(async (sql) => {
+    if (sql.includes('SELECT is_admin')) return { rows: [{ is_admin: false }] };
+    return { rows: [] };
+  });
+}
+
 beforeEach(() => broadcast.mockClear());
 
 // ── event:add ─────────────────────────────────────────────────────────────────
 
 describe('event:add', () => {
-  it('сначала завершает все активные события группы', async () => {
+  it('admin: сначала завершает все активные события группы', async () => {
     const calls = [];
-    const pool = makePool(async (sql) => {
+    const pool = makeAdminPool((sql) => {
       calls.push(sql.replace(/\s+/g, ' ').trim());
-      return { rows: [] };
     });
 
     await dispatchMessage({ type: 'event:add', name: 'BBQ' }, ctx(pool));
 
-    // Первый вызов должен быть UPDATE … status='completed'
-    expect(calls[0]).toMatch(/UPDATE events SET status='completed'/);
-    expect(calls[0]).toContain("status='active'");
+    const updateCall = calls.find(s => /UPDATE events SET status='completed'/.test(s));
+    expect(updateCall).toBeDefined();
+    expect(updateCall).toContain("status='active'");
   });
 
-  it('INSERT нового события идёт после UPDATE, статус active', async () => {
+  it('admin: INSERT нового события идёт после UPDATE, статус active', async () => {
     const calls = [];
-    const pool = makePool(async (sql) => {
-      calls.push(sql.replace(/\s+/g, ' ').trim());
-      return { rows: [] };
-    });
+    const pool = makeAdminPool((sql) => { calls.push(sql.replace(/\s+/g, ' ').trim()); });
 
     await dispatchMessage({ type: 'event:add', name: 'BBQ', date: '2026-07-01' }, ctx(pool));
 
     const insertCall = calls.find(s => s.startsWith('INSERT INTO events'));
     expect(insertCall).toBeDefined();
     expect(insertCall).toContain("'active'");
-    // INSERT идёт вторым (после UPDATE)
-    expect(calls.indexOf(insertCall)).toBeGreaterThan(calls.indexOf(calls[0]));
+    const updateIdx = calls.findIndex(s => /UPDATE events/.test(s));
+    expect(calls.indexOf(insertCall)).toBeGreaterThan(updateIdx);
   });
 
-  it('передаёт name, date, time, location в INSERT', async () => {
+  it('admin: передаёт name, date, time, location в INSERT', async () => {
     const params = [];
-    const pool = makePool(async (sql, p) => {
-      if (sql.includes('INSERT INTO events')) params.push(...p);
-      return { rows: [] };
-    });
+    const pool = makeAdminPool((sql, p) => { if (sql.includes('INSERT INTO events')) params.push(...p); });
 
     await dispatchMessage(
       { type: 'event:add', name: 'Пикник', date: '2026-08-15', time: '12:00', location: 'Парк' },
@@ -75,21 +83,29 @@ describe('event:add', () => {
     expect(params).toContain('Парк');
   });
 
-  it('после создания вызывает broadcast со state', async () => {
-    const pool = makePool(async () => ({ rows: [] }));
+  it('admin: после создания вызывает broadcast со state', async () => {
+    const pool = makeAdminPool();
     await dispatchMessage({ type: 'event:add', name: 'X' }, ctx(pool));
     expect(broadcast).toHaveBeenCalledWith('g1', expect.objectContaining({ type: 'state' }));
+  });
+
+  it('не-admin: не может создать событие', async () => {
+    const pool = makeNonAdminPool();
+    await dispatchMessage({ type: 'event:add', name: 'X' }, ctx(pool));
+
+    const insert = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO events'));
+    expect(insert).toBeUndefined();
+    expect(broadcast).not.toHaveBeenCalled();
   });
 });
 
 // ── event:complete ────────────────────────────────────────────────────────────
 
 describe('event:complete', () => {
-  it('делает UPDATE с status=completed для нужного события и группы', async () => {
+  it('admin: делает UPDATE status=completed для нужного события и группы', async () => {
     const queries = [];
-    const pool = makePool(async (sql, params) => {
+    const pool = makeAdminPool((sql, params) => {
       queries.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
-      return { rows: [] };
     });
 
     await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool));
@@ -98,21 +114,34 @@ describe('event:complete', () => {
     expect(upd).toBeDefined();
     expect(upd.sql).toContain("status='completed'");
     expect(upd.params).toContain('evt1');
-    expect(upd.params).toContain('g1'); // только в рамках своей группы
+    expect(upd.params).toContain('g1');
   });
 
-  it('не трогает события другой группы', async () => {
+  it('admin: не трогает события другой группы', async () => {
     const queries = [];
-    const pool = makePool(async (sql, params) => {
-      queries.push({ sql, params });
-      return { rows: [] };
-    });
+    const pool = makeAdminPool((sql, params) => { queries.push({ sql, params }); });
 
-    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool, { groupId: 'g1' }));
+    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool));
 
     const upd = queries.find(q => q.sql.includes('UPDATE events'));
-    // WHERE содержит group_id=g1, а не какую-то другую группу
     expect(upd.params).toEqual(['evt1', 'g1']);
+  });
+
+  it('не-admin: не может завершить событие', async () => {
+    const pool = makeNonAdminPool();
+    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool));
+
+    const upd = pool.query.mock.calls.find(([sql]) => sql.includes('UPDATE events'));
+    expect(upd).toBeUndefined();
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it('без userId: не может завершить событие', async () => {
+    const pool = makeNonAdminPool();
+    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool, { userId: null }));
+
+    const upd = pool.query.mock.calls.find(([sql]) => sql.includes('UPDATE events'));
+    expect(upd).toBeUndefined();
   });
 });
 
