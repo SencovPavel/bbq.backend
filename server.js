@@ -7,6 +7,7 @@ const { broadcast, createWsHandler } = require('./lib/ws');
 const { handleRequest } = require('./lib/routes');
 const { setWebhook }              = require('./lib/bot');
 const { setWebhook: setMaxWebhook } = require('./lib/bot-max');
+const { logWebhookConfigWarnings } = require('./lib/webhook-auth');
 
 const PORT = process.env.PORT || 3001;
 
@@ -30,6 +31,8 @@ wss = new WebSocketServer({ server });
 createWsHandler(wss);
 
 async function start() {
+  logWebhookConfigWarnings();
+
   try {
     await pool.query('SELECT 1');
     console.log('✅ DB connected');
