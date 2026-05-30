@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Pool } = require('pg');
+const { normalizeEventStatusPerGroup } = require('./lib/migrate-event-status');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function migrate() {
@@ -222,6 +223,17 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_activity_group ON group_activity(group_id, created_at DESC);
     `);
     console.log('✅ Миграция v9 (group activity) выполнена');
+
+    // v10: одно active-событие на группу (последнее по created_at)
+    const { activeEvents } = await normalizeEventStatusPerGroup(client);
+    if (activeEvents.length === 0) {
+      console.log('  ↳ Событий для нормализации статуса не найдено');
+    } else {
+      for (const evt of activeEvents) {
+        console.log(`  ↳ Группа ${evt.group_id}: active → «${evt.name}» (${evt.id})`);
+      }
+    }
+    console.log(`✅ Миграция v10 (event status normalize): ${activeEvents.length} групп`);
   } finally {
     client.release();
     await pool.end();
