@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws');
 
 const { pool }          = require('./lib/db');
 const { broadcast, createWsHandler } = require('./lib/ws');
-const { handleRequest } = require('./lib/routes');
+const { handleRequest } = require('./lib/router');
 const { setWebhook }              = require('./lib/bot');
 const { setWebhook: setMaxWebhook } = require('./lib/bot-max');
 const { logWebhookConfigWarnings } = require('./lib/webhook-auth');
