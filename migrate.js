@@ -234,6 +234,52 @@ async function migrate() {
       }
     }
     console.log(`✅ Миграция v10 (статусы событий): ${activeEvents.length} активных событий`);
+
+    // v11: event RSVP — отметка явки участника на событие
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS event_rsvp (
+        event_id    TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        user_id     TEXT NOT NULL,
+        attending   BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at  TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (event_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_rsvp_event ON event_rsvp(event_id);
+    `);
+    console.log('✅ Миграция v11 (event RSVP) выполнена');
+
+    // v12: family members — «Семья» привязана к аккаунту, не к группе
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS family_members (
+        id          TEXT PRIMARY KEY,
+        owner_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        label       TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS family_member_rsvp (
+        family_member_id  TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+        event_id          TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        attending         BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at        TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (family_member_id, event_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS family_group_settings (
+        family_member_id  TEXT NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+        group_id          TEXT NOT NULL REFERENCES picnic_groups(id) ON DELETE CASCADE,
+        include_in_calc   BOOLEAN NOT NULL DEFAULT TRUE,
+        cost_pct          INTEGER NOT NULL DEFAULT 100
+                          CHECK (cost_pct BETWEEN 0 AND 200),
+        PRIMARY KEY (family_member_id, group_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_family_owner   ON family_members(owner_id);
+      CREATE INDEX IF NOT EXISTS idx_family_rsvp    ON family_member_rsvp(event_id);
+      CREATE INDEX IF NOT EXISTS idx_family_grp_set ON family_group_settings(group_id);
+    `);
+    console.log('✅ Миграция v12 (family members) выполнена');
   } finally {
     client.release();
     await pool.end();
