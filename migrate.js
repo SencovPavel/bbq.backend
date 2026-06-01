@@ -280,6 +280,27 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_family_grp_set ON family_group_settings(group_id);
     `);
     console.log('✅ Миграция v12 (family members) выполнена');
+
+    // v13: is_superadmin + analytics_events
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE;
+
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id         SERIAL PRIMARY KEY,
+        type       TEXT NOT NULL,
+        user_id    TEXT,
+        group_id   TEXT,
+        platform   TEXT,
+        meta       JSONB DEFAULT '{}',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_analytics_type_ts  ON analytics_events(type, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_ts       ON analytics_events(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_group    ON analytics_events(group_id) WHERE group_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_analytics_user     ON analytics_events(user_id)  WHERE user_id  IS NOT NULL;
+    `);
+    console.log('✅ Миграция v13 (analytics_events + is_superadmin) выполнена');
   } finally {
     client.release();
     await pool.end();
