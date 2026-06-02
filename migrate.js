@@ -301,6 +301,12 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS idx_analytics_user     ON analytics_events(user_id)  WHERE user_id  IS NOT NULL;
     `);
     console.log('✅ Миграция v13 (analytics_events + is_superadmin) выполнена');
+
+    // v14: bio поле профиля
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
+    `);
+    console.log('✅ Миграция v14 (users.bio) выполнена');
   } finally {
     client.release();
     await pool.end();
