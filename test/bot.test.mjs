@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { resolveCatId, isDuplicateName } = require('../lib/bot.js');
+const { resolveCatId, isDuplicateName, defaultEventName } = require('../lib/bot.js');
 
 // ── resolveCatId ──────────────────────────────────────────────────────────────
 
@@ -54,5 +54,17 @@ describe('isDuplicateName', () => {
 
   it('короткое имя (< 8 символов) тоже дедуплицируется', () => {
     expect(isDuplicateName(['Соль мелкая'], 'Соль')).toBe(true);
+  });
+});
+
+// ── defaultEventName ──────────────────────────────────────────────────────────
+
+describe('defaultEventName', () => {
+  it('использует название чата', () => {
+    expect(defaultEventName('Шашлык в Покровском')).toBe('Шашлык в Покровском');
+  });
+
+  it('подставляет «Пикник» если название пустое', () => {
+    expect(defaultEventName('   ')).toBe('Пикник');
   });
 });
