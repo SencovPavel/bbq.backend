@@ -307,6 +307,12 @@ async function migrate() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT;
     `);
     console.log('✅ Миграция v14 (users.bio) выполнена');
+
+    // v15: эмодзи-иконка группы
+    await client.query(`
+      ALTER TABLE picnic_groups ADD COLUMN IF NOT EXISTS emoji TEXT;
+    `);
+    console.log('✅ Миграция v15 (groups.emoji) выполнена');
   } finally {
     client.release();
     await pool.end();
