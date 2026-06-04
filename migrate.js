@@ -313,6 +313,23 @@ async function migrate() {
       ALTER TABLE picnic_groups ADD COLUMN IF NOT EXISTS emoji TEXT;
     `);
     console.log('✅ Миграция v15 (groups.emoji) выполнена');
+
+    // v16: admin audit log + мягкое архивирование групп
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_audit_log (
+        id          SERIAL PRIMARY KEY,
+        actor_id    TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id   TEXT NOT NULL,
+        payload     JSONB DEFAULT '{}',
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_audit_ts ON admin_audit_log(created_at DESC);
+
+      ALTER TABLE picnic_groups ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    `);
+    console.log('✅ Миграция v16 (admin_audit_log + groups.archived_at) выполнена');
   } finally {
     client.release();
     await pool.end();
