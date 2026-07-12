@@ -8,6 +8,9 @@ const { handleRequest } = require('./lib/router');
 const { setWebhook }              = require('./lib/bot');
 const { setWebhook: setMaxWebhook } = require('./lib/bot-max');
 const { logWebhookConfigWarnings } = require('./lib/webhook-auth');
+const { checkEventReminders }     = require('./lib/reminders');
+
+const REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 
 const PORT = process.env.PORT || 3001;
 
@@ -49,6 +52,8 @@ async function start() {
     if (process.env.PUBLIC_URL && process.env.MAX_TOKEN) {
       await setMaxWebhook();
     }
+    checkEventReminders(pool).catch(e => console.error('[reminders]', e.message));
+    setInterval(() => checkEventReminders(pool).catch(e => console.error('[reminders]', e.message)), REMINDER_INTERVAL_MS);
   });
 }
 

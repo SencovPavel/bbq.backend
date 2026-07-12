@@ -337,6 +337,14 @@ async function migrate() {
       ALTER TABLE events ADD COLUMN IF NOT EXISTS has_budget BOOLEAN NOT NULL DEFAULT true;
     `);
     console.log('✅ Миграция v17 (events.type + events.has_budget) выполнена');
+
+    // v18: тип позиции (взять/сделать) + флаги отправленных напоминаний о событии
+    await client.query(`
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'bring';
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS reminder_4d_sent BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS reminder_1d_sent BOOLEAN NOT NULL DEFAULT false;
+    `);
+    console.log('✅ Миграция v18 (items.kind + events.reminder_*_sent) выполнена');
   } finally {
     client.release();
     await pool.end();
