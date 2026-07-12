@@ -330,6 +330,13 @@ async function migrate() {
       ALTER TABLE picnic_groups ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
     `);
     console.log('✅ Миграция v16 (admin_audit_log + groups.archived_at) выполнена');
+
+    // v17: тип события + опция «без бюджета»
+    await client.query(`
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS type TEXT;
+      ALTER TABLE events ADD COLUMN IF NOT EXISTS has_budget BOOLEAN NOT NULL DEFAULT true;
+    `);
+    console.log('✅ Миграция v17 (events.type + events.has_budget) выполнена');
   } finally {
     client.release();
     await pool.end();
