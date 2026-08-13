@@ -1,20 +1,65 @@
-name: Deploy
+# picnic-backend/.github/workflows/deploy.yml
+#
+# Сборка на GitHub-раннере → на сервер по SSH приезжает готовый артефакт
+# (код + production node_modules). На сервере: распаковка в releases/<sha>,
+# миграции, переключение симлинка current, pm2 reload, health-check.
+
+name: Build & Deploy
 
 on:
   push:
     branches: [main, dev]
 
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
-    name: Deploy → ${{ github.ref_name }}
-    runs-on: self-hosted
+    name: Build & Deploy → ${{ github.ref_name }}
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy backend
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install & test
+        run: |
+          npm ci
+          npm test
+
+      - name: Prune dev dependencies
+        run: npm prune --omit=dev
+
+      - name: Pack release
+        run: |
+          tar czf release.tgz \
+            server.js migrate.js ecosystem.config.js \
+            package.json package-lock.json \
+            lib node_modules
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
+          printf 'Host deploy\n  HostName %s\n  Port %s\n  User %s\n  IdentityFile ~/.ssh/id_ed25519\n' \
+            "$SSH_HOST" "$SSH_PORT" "${{ secrets.SSH_USER }}" >> ~/.ssh/config
+
+      - name: Upload & activate release
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
-          set -e
+          set -euo pipefail
 
           if [ "$BRANCH" = "main" ]; then
             DEPLOY_DIR="/var/www/picnic/be-main"
@@ -23,17 +68,49 @@ jobs:
             DEPLOY_DIR="/var/www/picnic/be-dev"
             PM2_NAME="picnic-dev"
           fi
+          SHA="${GITHUB_SHA::7}"
 
-          echo "▶ Deploying backend '$BRANCH' → $DEPLOY_DIR"
+          scp release.tgz "deploy:/tmp/picnic-be-$SHA.tgz"
 
-          cd "$DEPLOY_DIR"
-          git fetch origin
-          git checkout "$BRANCH"
-          git reset --hard "origin/$BRANCH"
-          npm ci --prefer-offline
+          ssh deploy "DEPLOY_DIR='$DEPLOY_DIR' PM2_NAME='$PM2_NAME' SHA='$SHA' bash -s" <<'REMOTE'
+            set -euo pipefail
 
-          pm2 describe "$PM2_NAME" > /dev/null 2>&1 \
-            && pm2 reload "$PM2_NAME" --update-env \
-            || PM2_NAME="$PM2_NAME" pm2 start ecosystem.config.js
+            RELEASE="$DEPLOY_DIR/releases/$SHA"
+            mkdir -p "$RELEASE"
+            tar xzf "/tmp/picnic-be-$SHA.tgz" -C "$RELEASE"
+            rm -f "/tmp/picnic-be-$SHA.tgz"
 
-          echo "✅ Done: $PM2_NAME restarted"
+            # .env хранится вне релизов и подключается симлинком
+            ln -sfn "$DEPLOY_DIR/shared/.env" "$RELEASE/.env"
+
+            # Миграции — до переключения трафика
+            cd "$RELEASE"
+            npm run migrate
+
+            # Атомарное переключение
+            ln -sfn "$RELEASE" "$DEPLOY_DIR/current"
+
+            cd "$DEPLOY_DIR/current"
+            PM2_NAME="$PM2_NAME" pm2 startOrReload ecosystem.config.js --update-env
+            pm2 save
+
+            # Health-check (порт берём из .env, по умолчанию 3001)
+            PORT="$(grep -E '^PORT=' "$DEPLOY_DIR/shared/.env" | cut -d= -f2 || true)"
+            PORT="${PORT:-3001}"
+            for i in $(seq 1 15); do
+              if curl -fsS "http://127.0.0.1:$PORT/health" > /dev/null; then
+                echo "✅ Health-check OK ($PM2_NAME, release $SHA)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "❌ Health-check failed — смотри pm2 logs $PM2_NAME"
+            exit 1
+          REMOTE
+
+      - name: Prune old releases
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ "$BRANCH" = "main" ]; then DEPLOY_DIR="/var/www/picnic/be-main"; else DEPLOY_DIR="/var/www/picnic/be-dev"; fi
+          ssh deploy "ls -1dt '$DEPLOY_DIR'/releases/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf --"
