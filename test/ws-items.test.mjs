@@ -18,6 +18,13 @@ function wrapPool(handler) {
     if (typeof sql === 'string' && sql.includes('SELECT status FROM events')) {
       return { rows: [{ status: 'active' }] };
     }
+    // item:add теперь валидирует существование категории/события в группе до INSERT.
+    if (typeof sql === 'string' && sql.includes('SELECT id FROM categories')) {
+      return { rows: [{ id: params?.[0] ?? 'cat' }] };
+    }
+    if (typeof sql === 'string' && sql.includes('SELECT id FROM events')) {
+      return { rows: [{ id: params?.[0] ?? 'evt' }] };
+    }
     if (handler) return handler(sql, params);
     return { rows: [] };
   };

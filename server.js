@@ -57,6 +57,11 @@ async function start() {
   });
 }
 
+// Не роняем процесс из-за необработанного промиса — логируем и продолжаем.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason instanceof Error ? reason.stack : reason);
+});
+
 process.on('SIGTERM', async () => { await pool.end(); process.exit(0); });
 process.on('SIGINT',  async () => { await pool.end(); process.exit(0); });
 
