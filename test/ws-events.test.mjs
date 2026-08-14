@@ -21,6 +21,12 @@ function ctx(pool, extra = {}) {
   return { groupId: 'g1', userId: 'u1', pool, getFullState, broadcast, ...extra };
 }
 
+/** Мок-сокет: собирает распарсенные фреймы, отправленные клиенту */
+function makeWs() {
+  const frames = [];
+  return { frames, send: vi.fn((raw) => frames.push(JSON.parse(raw))) };
+}
+
 /** Пул где текущий пользователь — администратор */
 function withMembership(handler) {
   return async (sql, params) => {
@@ -98,13 +104,15 @@ describe('event:add', () => {
     expect(broadcast).toHaveBeenCalledWith('g1', expect.objectContaining({ type: 'state' }));
   });
 
-  it('не-admin: не может создать событие', async () => {
+  it('не-admin: не может создать событие и получает forbidden', async () => {
     const pool = makeNonAdminPool();
-    await dispatchMessage({ type: 'event:add', name: 'X' }, ctx(pool));
+    const ws = makeWs();
+    await dispatchMessage({ type: 'event:add', name: 'X' }, ctx(pool, { senderWs: ws }));
 
     const insert = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO events'));
     expect(insert).toBeUndefined();
     expect(broadcast).not.toHaveBeenCalled();
+    expect(ws.frames).toEqual([{ type: 'error', code: 'forbidden' }]);
   });
 });
 
@@ -136,13 +144,15 @@ describe('event:complete', () => {
     expect(upd.params).toEqual(['evt1', 'g1']);
   });
 
-  it('не-admin: не может завершить событие', async () => {
+  it('не-admin: не может завершить событие и получает forbidden', async () => {
     const pool = makeNonAdminPool();
-    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool));
+    const ws = makeWs();
+    await dispatchMessage({ type: 'event:complete', id: 'evt1' }, ctx(pool, { senderWs: ws }));
 
     const upd = pool.query.mock.calls.find(([sql]) => sql.includes('UPDATE events'));
     expect(upd).toBeUndefined();
     expect(broadcast).not.toHaveBeenCalled();
+    expect(ws.frames).toEqual([{ type: 'error', code: 'forbidden' }]);
   });
 
   it('без userId: не может завершить событие', async () => {
@@ -190,5 +200,71 @@ describe('event:delete', () => {
 
     const del = queries.find(q => q.sql.includes('DELETE FROM events'));
     expect(del.params).toEqual(['evt9', 'g1']);
+  });
+
+  it('не-admin: не может удалить событие и получает forbidden', async () => {
+    const pool = makeNonAdminPool();
+    const ws = makeWs();
+    await dispatchMessage({ type: 'event:delete', id: 'evt9' }, ctx(pool, { senderWs: ws }));
+
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('DELETE FROM events'))).toBe(false);
+    expect(ws.frames).toEqual([{ type: 'error', code: 'forbidden' }]);
+  });
+});
+
+// ── сидинг категорий по типу события ──────────────────────────────────────────
+
+describe('event:add — категории из шаблона типа', () => {
+  /** Пул, где в группе уже есть категории `existing` (title + position) */
+  function seedPool(existing = []) {
+    return makeAdminPool(async (sql) => {
+      if (sql.includes('SELECT title, position FROM categories')) return { rows: existing };
+      return { rows: [] };
+    });
+  }
+
+  it('досеивает недостающие категории одним multi-row INSERT', async () => {
+    const pool = seedPool();
+    await dispatchMessage({ type: 'event:add', name: 'Поход', eventType: 'trip' }, ctx(pool));
+
+    const inserts = pool.query.mock.calls.filter(([sql]) => sql.includes('INSERT INTO categories'));
+    expect(inserts).toHaveLength(1);
+
+    const [sql, params] = inserts[0];
+    // 3 категории шаблона trip × 5 колонок
+    expect(params).toHaveLength(15);
+    expect(sql).toContain('($1,$2,$3,$4,$5),($6,$7,$8,$9,$10),($11,$12,$13,$14,$15)');
+    const titles = params.filter((_, i) => i % 5 === 2);
+    expect(titles).toEqual(['Билеты и жильё', 'Сборы', 'На месте']);
+    // position продолжает нумерацию с 1 при пустой группе
+    expect(params.filter((_, i) => i % 5 === 4)).toEqual([1, 2, 3]);
+  });
+
+  it('пропускает уже существующие по title и продолжает position от максимума', async () => {
+    const pool = seedPool([{ title: '  сборы ', position: 4 }]);
+    await dispatchMessage({ type: 'event:add', name: 'Поход', eventType: 'trip' }, ctx(pool));
+
+    const [, params] = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO categories'));
+    expect(params).toHaveLength(10);
+    expect(params.filter((_, i) => i % 5 === 2)).toEqual(['Билеты и жильё', 'На месте']);
+    expect(params.filter((_, i) => i % 5 === 4)).toEqual([5, 6]);
+  });
+
+  it('если все категории шаблона уже есть — INSERT не выполняется', async () => {
+    const pool = seedPool([
+      { title: 'Задачи', position: 1 },
+    ]);
+    await dispatchMessage({ type: 'event:add', name: 'Своё', eventType: 'custom' }, ctx(pool));
+
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO categories'))).toBe(false);
+  });
+
+  it('неизвестный тип события — категории не сеются, type=null', async () => {
+    const pool = seedPool();
+    await dispatchMessage({ type: 'event:add', name: 'X', eventType: 'мимо' }, ctx(pool));
+
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO categories'))).toBe(false);
+    const [, params] = pool.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO events'));
+    expect(params[7]).toBeNull(); // type
   });
 });

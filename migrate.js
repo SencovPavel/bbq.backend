@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 const { normalizeEventStatusPerGroup } = require('./lib/migrate-event-status');
+const { attachOrphanItemsToEvents } = require('./lib/migrate-orphan-items');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function migrate() {
@@ -95,42 +96,11 @@ async function migrate() {
     console.log('✅ Миграция v4 выполнена');
 
     // v4.1: для каждой группы с позициями без event_id — создать дефолтное событие
-    const { rows: groups } = await client.query(`
-      SELECT DISTINCT g.id, g.name
-      FROM picnic_groups g
-      JOIN items i ON i.group_id = g.id
-      WHERE i.event_id IS NULL
-    `);
-
-    for (const group of groups) {
-      // Проверяем, нет ли уже события у этой группы
-      const { rows: existing } = await client.query(
-        'SELECT id FROM events WHERE group_id = $1 LIMIT 1',
-        [group.id],
-      );
-
-      let eventId;
-      if (existing.length) {
-        // Событие уже есть — привяжем осиротевшие позиции к нему
-        eventId = existing[0].id;
-      } else {
-        // Создаём дефолтное событие с именем группы
-        eventId = require('crypto').randomBytes(4).toString('hex'); // 8 hex chars
-        await client.query(
-          `INSERT INTO events(id, group_id, name) VALUES($1, $2, $3)`,
-          [eventId, group.id, group.name],
-        );
-      }
-
-      // Привязываем все позиции без event_id к этому событию
-      const { rowCount } = await client.query(
-        'UPDATE items SET event_id = $1 WHERE group_id = $2 AND event_id IS NULL',
-        [eventId, group.id],
-      );
-      console.log(`  ↳ Группа "${group.name}": привязано ${rowCount} позиций к событию ${eventId}`);
+    const { fixed } = await attachOrphanItemsToEvents(client);
+    for (const row of fixed) {
+      console.log(`  ↳ Группа "${row.groupName}": привязано ${row.itemCount} позиций к событию ${row.eventId}`);
     }
-
-    if (groups.length === 0) {
+    if (fixed.length === 0) {
       console.log('  ↳ Осиротевших позиций не найдено');
     }
     console.log('✅ Миграция v4.1 выполнена');
